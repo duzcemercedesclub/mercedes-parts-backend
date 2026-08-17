@@ -27,6 +27,8 @@ const contactRoutes = require('./routes/contactRoutes');
 // Kullanıcı Etkinlik/Sipariş Rotaları
 const userActivityRoutes = require('./routes/userActivity');
 
+//  Kupon Rotalarını İçe Aktarın
+const couponRoutes = require('./routes/couponRoutes');
 // Veritabanı Tabanlı Sipariş ve Ödeme Rotaları
 const ordersRouter = require('./routes/orders');
 const checkoutRoutes = require('./routes/checkoutRoutes');
@@ -80,6 +82,7 @@ app.use('/api/smtp-settings', smtpRoutes);
 app.use('/api/social-links', socialRoutes);
 app.use('/api/testimonials', testimonialRoutes);
 app.use('/api/contact', contactRoutes);
+app.use('/api/coupons', couponRoutes);
 
 // Sipariş ve Ödeme Rotaları
 app.use('/api/checkout', checkoutRoutes);
