@@ -45,13 +45,16 @@ router.post('/create-session', async (req, res) => {
 
     const orderNumber = generateOrderNumber();
 
+    // CANLI FRONTEND YÖNLENDİRME URL'İ
+    const frontendUrl = process.env.FRONTEND_URL || 'https://mercedes-parts-frontend.vercel.app';
+
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: lineItems,
       mode: 'payment',
       customer_email: user.email,
-      success_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/checkout-success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:5173'}/cart`,
+      success_url: `${frontendUrl}/checkout-success?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${frontendUrl}/cart`,
       metadata: {
         userId: String(user.id),
         orderNumber: orderNumber,
