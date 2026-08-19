@@ -29,7 +29,7 @@ router.get('/settings', async (req, res) => {
     }
 });
 
-// 2. İletişim Formunu Gönder (Veritabanına Kaydet & SMTP İle Mail At)
+// 2. İletişim Formunu Gönder (Veritabanına Kaydet & Arka Planda SMTP İle Mail At)
 router.post('/send-message', async (req, res) => {
     const { name, email, phone, subject, message } = req.body;
 
@@ -38,47 +38,53 @@ router.post('/send-message', async (req, res) => {
     }
 
     try {
-        // A. Veritabanına Kaydet
+        // A. Veritabanına Kaydet (Milisaniyeler içinde tamamlanır)
         const sqlInsert = `
             INSERT INTO contact_messages (name, email, phone, subject, message, status, created_at)
             VALUES (?, ?, ?, ?, ?, 'Okunmadı', NOW())
         `;
         await db.query(sqlInsert, [name, email, phone || '', subject || 'Genel İletişim', message]);
 
-        // B. SMTP Ayarlarından Admin E-Posta Adresini Al
-        const [smtpRows] = await db.query('SELECT from_email, smtp_user FROM smtp_settings WHERE id = 1');
-        const adminEmail = smtpRows[0]?.from_email || smtpRows[0]?.smtp_user;
-
-        if (adminEmail) {
-            const emailHtml = `
-                <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
-                    <h2 style="color: #1a365d;">Siteden Yeni İletişim Mesajı Geldi</h2>
-                    <hr />
-                    <p><strong>Gönderen Ad Soyad:</strong> ${name}</p>
-                    <p><strong>E-Posta:</strong> <a href="mailto:${email}">${email}</a></p>
-                    <p><strong>Telefon:</strong> ${phone || 'Belirtilmedi'}</p>
-                    <p><strong>Konu:</strong> ${subject || 'İletişim Formu'}</p>
-                    <hr />
-                    <p><strong>Mesaj İçeriği:</strong></p>
-                    <div style="background-color: #f7fafc; padding: 15px; border-left: 4px solid #3182ce; border-radius: 4px;">
-                        ${message.replace(/\n/g, '<br/>')}
-                    </div>
-                </div>
-            `;
-
-            // SMTP Üzerinden Admin'e Mail Gönder (replyTo: Müşterinin E-postası)
-            await sendEmail({
-                to: adminEmail,
-                subject: `[İletişim Formu] ${subject || name}`,
-                html: emailHtml,
-                replyTo: email
-            });
-        }
-
+        // B. İstemciye (Frontend) Anında Yanıt Ver (Butonun takılmasını ve Zaman Aşımını Önler)
         res.status(200).json({ message: 'Mesajınız başarıyla alındı ve iletildi.' });
 
+        // C. SMTP E-Posta Gönderimini Arka Planda (Asenkron) Çalıştır
+        (async () => {
+            try {
+                const [smtpRows] = await db.query('SELECT from_email, smtp_user FROM smtp_settings WHERE id = 1');
+                const adminEmail = smtpRows[0]?.from_email || smtpRows[0]?.smtp_user;
+
+                if (adminEmail) {
+                    const emailHtml = `
+                        <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+                            <h2 style="color: #1a365d;">Siteden Yeni İletişim Mesajı Geldi</h2>
+                            <hr />
+                            <p><strong>Gönderen Ad Soyad:</strong> ${name}</p>
+                            <p><strong>E-Posta:</strong> <a href="mailto:${email}">${email}</a></p>
+                            <p><strong>Telefon:</strong> ${phone || 'Belirtilmedi'}</p>
+                            <p><strong>Konu:</strong> ${subject || 'İletişim Formu'}</p>
+                            <hr />
+                            <p><strong>Mesaj İçeriği:</strong></p>
+                            <div style="background-color: #f7fafc; padding: 15px; border-left: 4px solid #3182ce; border-radius: 4px;">
+                                ${message.replace(/\n/g, '<br/>')}
+                            </div>
+                        </div>
+                    `;
+
+                    await sendEmail({
+                        to: adminEmail,
+                        subject: `[İletişim Formu] ${subject || name}`,
+                        html: emailHtml,
+                        replyTo: email
+                    });
+                }
+            } catch (emailErr) {
+                console.error('Arka planda e-posta gönderilirken hata oluştu:', emailErr);
+            }
+        })();
+
     } catch (err) {
-        console.error('İletişim formu gönderme hatası:', err);
+        console.error('İletişim formu veritabanı hatası:', err);
         res.status(500).json({ message: 'Mesaj gönderilirken sunucu hatası oluştu: ' + err.message });
     }
 });
@@ -165,7 +171,7 @@ router.delete('/admin/messages/:id', async (req, res) => {
     }
 });
 
-// 7. Admin: İletişim Ayarlarını Güncelle (Adres, Tel, Başlık, Açıklama vb.)
+// 7. Admin: İletişim Ayarlarını Güncelle
 router.put('/admin/settings', async (req, res) => {
     const { info_title, info_description, address, phone, email, working_hours, map_url } = req.body;
 
