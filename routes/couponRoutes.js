@@ -13,7 +13,7 @@ const authenticateToken = (req, res, next) => {
   }
 
   jwt.verify(token, process.env.JWT_SECRET || 'secretkey', (err, user) => {
-    if (err) return res.status(403).json({ message: 'Geçersiz token.' });
+    if (err) return res.status(403).json({ message: 'Geçersiz veya süresi dolmuş token.' });
     req.user = user;
     next();
   });
@@ -134,6 +134,75 @@ router.get('/my-coupons', authenticateToken, async (req, res) => {
   } catch (error) {
     console.error('Müşteri kupon çekme hatası:', error);
     res.status(500).json({ message: 'Kuponlarınız getirilemedi.' });
+  }
+});
+
+// 5. SEPETTE KUPON DOĞRULAMA VE UYGULAMA (POST /api/coupons/validate)
+router.post('/validate', authenticateToken, async (req, res) => {
+  try {
+    const { code, subtotal } = req.body;
+    const userId = req.user.id;
+
+    if (!code || !code.trim()) {
+      return res.status(400).json({ success: false, message: 'Lütfen bir kupon kodu giriniz.' });
+    }
+
+    const cleanCode = code.trim().toUpperCase();
+
+    // Kuponu veritabanından sorgula
+    const [rows] = await db.query(
+      `SELECT * FROM coupons WHERE UPPER(code) = ? AND is_active = 1 LIMIT 1`,
+      [cleanCode]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Geçersiz veya aktif olmayan kupon kodu.' });
+    }
+
+    const coupon = rows[0];
+
+    // Kullanıcıya özel kupon kontrolü (Genel kuponlarda user_id null olur)
+    if (coupon.user_id && coupon.user_id !== userId) {
+      return res.status(403).json({ success: false, message: 'Bu kupon sizin hesabınıza tanımlı değildir.' });
+    }
+
+    // Tarih Kontrolü (Başlangıç ve Bitiş)
+    const now = new Date();
+    if (coupon.start_date && new Date(coupon.start_date) > now) {
+      return res.status(400).json({ success: false, message: 'Bu kupon henüz kullanıma açılmamıştır.' });
+    }
+    if (coupon.end_date && new Date(coupon.end_date) < now) {
+      return res.status(400).json({ success: false, message: 'Bu kuponun kullanım süresi dolmuştur.' });
+    }
+
+    // Minimum Sepet Tutarı Kontrolü
+    const cartSubtotal = Number(subtotal) || 0;
+    const minSpend = Number(coupon.min_spend) || 0;
+
+    if (minSpend > 0 && cartSubtotal < minSpend) {
+      return res.status(400).json({ 
+        success: false, 
+        message: `Bu kuponu kullanabilmek için sepet tutarının en az ${minSpend} TL olması gerekmektedir.` 
+      });
+    }
+
+    // Tüm kontroller başarılı
+    return res.json({
+      success: true,
+      message: 'Kupon başarıyla uygulandı.',
+      coupon: {
+        id: coupon.id,
+        code: coupon.code,
+        title: coupon.title,
+        discount_type: coupon.discount_type, // 'percentage' veya 'fixed'
+        discount_amount: coupon.discount_amount,
+        min_spend: coupon.min_spend
+      }
+    });
+
+  } catch (error) {
+    console.error('Kupon doğrulama hatası:', error);
+    return res.status(500).json({ success: false, message: 'Kupon doğrulanırken bir sunucu hatası oluştu.' });
   }
 });
 
