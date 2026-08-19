@@ -14,12 +14,13 @@ const generateOrderNumber = () => {
 // 1. STRIPE CHECKOUT OTURUMU OLUŞTURMA
 router.post('/create-session', async (req, res) => {
   try {
-    const { items, user, shippingCost, discountAmount, totalAmount } = req.body;
+    const { items, user, shippingCost, discountAmount, couponCode, totalAmount } = req.body;
 
     if (!items || items.length === 0) {
       return res.status(400).json({ error: 'Sepetinizde ürün bulunmamaktadır.' });
     }
 
+    // Ürün Kalemleri
     const lineItems = items.map((item) => ({
       price_data: {
         currency: 'try',
@@ -32,6 +33,7 @@ router.post('/create-session', async (req, res) => {
       quantity: item.quantity,
     }));
 
+    // Kargo Ücreti Ekleme
     if (shippingCost > 0) {
       lineItems.push({
         price_data: {
@@ -43,14 +45,25 @@ router.post('/create-session', async (req, res) => {
       });
     }
 
-    const orderNumber = generateOrderNumber();
+    // Kupon İndirimini Stripe Detaylarına Yansıtma
+    let discounts = [];
+    if (Number(discountAmount) > 0) {
+      const stripeCoupon = await stripe.coupons.create({
+        amount_off: Math.round(Number(discountAmount) * 100),
+        currency: 'try',
+        name: couponCode ? `Kupon İndirimi (${couponCode})` : 'Kupon İndirimi',
+        duration: 'once',
+      });
+      discounts.push({ coupon: stripeCoupon.id });
+    }
 
-    // CANLI FRONTEND YÖNLENDİRME URL'İ
+    const orderNumber = generateOrderNumber();
     const frontendUrl = process.env.FRONTEND_URL || 'https://mercedes-parts-frontend.vercel.app';
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       line_items: lineItems,
+      discounts: discounts.length > 0 ? discounts : undefined,
       mode: 'payment',
       customer_email: user.email,
       success_url: `${frontendUrl}/checkout-success?session_id={CHECKOUT_SESSION_ID}`,
@@ -60,6 +73,7 @@ router.post('/create-session', async (req, res) => {
         orderNumber: orderNumber,
         shippingCost: String(shippingCost),
         discountAmount: String(discountAmount),
+        couponCode: String(couponCode || ''),
         totalAmount: String(totalAmount),
         shippingAddress: typeof user.address === 'object' ? JSON.stringify(user.address) : String(user.address || ''),
         billingAddress: typeof user.billingAddress === 'object' ? JSON.stringify(user.billingAddress) : String(user.billingAddress || user.address || ''),
@@ -90,7 +104,7 @@ router.post('/confirm-order', async (req, res) => {
       return res.status(400).json({ error: 'Ödeme henüz tamamlanmadı.' });
     }
 
-    // Daha önce eklenip eklenmediğini kontrol et
+    // Çift kayıt engelleme kontrolü
     const [existingOrders] = await connection.query(
       'SELECT id, order_number FROM orders WHERE stripe_session_id = ?',
       [sessionId]
@@ -149,28 +163,32 @@ router.post('/confirm-order', async (req, res) => {
 
     await connection.commit();
 
-    // Müşteriye Sipariş Onay E-postası Gönderimi
+    // Müşteriye hızlı onay yanıtı
+    res.json({ success: true, orderNumber });
+
+    // Sipariş Onay E-postasını arka planda gönder
     const customerEmail = session.customer_details?.email || session.customer_email;
     if (customerEmail) {
-      try {
-        await sendEmail({
-          to: customerEmail,
-          subject: `Siparişiniz Alındı - #${orderNumber}`,
-          html: `
-            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px; background-color: #f8fafc;">
-              <h2 style="color: #16a34a; margin-top: 0;">Teşekkürler, Siparişiniz Alındı!</h2>
-              <p>Sipariş Numaranız: <strong>#${orderNumber}</strong></p>
-              <p>Toplam Tutar: <strong>${totalAmount} TL</strong></p>
-              <p>Siparişiniz hazırlanmaya başladığında tekrar bilgilendirileceksiniz.</p>
-            </div>
-          `
-        });
-      } catch (emailError) {
-        console.error('Sipariş e-postası gönderilirken hata oluştu:', emailError);
-      }
+      (async () => {
+        try {
+          await sendEmail({
+            to: customerEmail,
+            subject: `Siparişiniz Alındı - #${orderNumber}`,
+            html: `
+              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px; background-color: #f8fafc;">
+                <h2 style="color: #16a34a; margin-top: 0;">Teşekkürler, Siparişiniz Alındı!</h2>
+                <p>Sipariş Numaranız: <strong>#${orderNumber}</strong></p>
+                <p>Toplam Tutar: <strong>${totalAmount} TL</strong></p>
+                <p>Siparişiniz hazırlanmaya başladığında tekrar bilgilendirileceksiniz.</p>
+              </div>
+            `
+          });
+        } catch (emailError) {
+          console.error('Sipariş e-postası gönderilirken hata oluştu:', emailError);
+        }
+      })();
     }
 
-    res.json({ success: true, orderNumber });
   } catch (error) {
     await connection.rollback();
     console.error('Sipariş Veritabanı Kayıt Hatası:', error);
