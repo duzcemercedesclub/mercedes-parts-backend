@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
 
-// GET / - Tüm siparişleri MySQL veritabanından çek
+// GET / - Tüm siparişleri getir
 router.get('/', async (req, res) => {
   try {
     const [orders] = await db.query(`
@@ -91,93 +91,30 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /:id - Tek bir siparişin detaylarını çek
-router.get('/:id', async (req, res) => {
+// PATCH /:id/cancel - Müşterinin Siparişi İptal Etmesi
+router.patch('/:id/cancel', async (req, res) => {
   const { id } = req.params;
 
   try {
-    const [orders] = await db.query(
-      `SELECT 
-        o.id,
-        o.order_number AS orderNumber,
-        o.stripe_session_id AS stripeSessionId,
-        o.subtotal,
-        o.shipping_cost AS shippingCost,
-        o.discount_amount AS discountAmount,
-        o.total_amount AS totalAmount,
-        o.payment_status AS paymentStatus,
-        o.order_status AS orderStatus,
-        o.cargo_company AS cargoCompany,
-        o.tracking_number AS trackingNumber,
-        o.shipping_address AS shippingAddress,
-        o.billing_address AS billingAddress,
-        o.created_at AS createdAt,
-        u.id AS userId,
-        u.name AS userName,
-        u.surname AS userSurname,
-        u.email AS userEmail
-      FROM orders o
-      LEFT JOIN users u ON o.user_id = u.id
-      WHERE o.id = ?`,
+    const [result] = await db.query(
+      `UPDATE orders 
+       SET order_status = 'İptal Edildi' 
+       WHERE id = ? AND order_status IN ('Ödeme Yapıldı', 'Sipariş Verildi', 'Hazırlanıyor')`,
       [id]
     );
 
-    if (!orders || orders.length === 0) {
-      return res.status(404).json({ error: 'Sipariş bulunamadı.' });
+    if (result.affectedRows === 0) {
+      return res.status(400).json({ error: 'Sipariş iptal edilebilir durumda değil veya bulunamadı.' });
     }
 
-    const order = orders[0];
-
-    const [items] = await db.query(
-      `SELECT product_id, product_name, price, quantity, total_price 
-       FROM order_items 
-       WHERE order_id = ?`,
-      [id]
-    );
-
-    let parsedAddress = order.shippingAddress;
-    if (typeof order.shippingAddress === 'string') {
-      try {
-        parsedAddress = JSON.parse(order.shippingAddress);
-      } catch (e) {
-        parsedAddress = order.shippingAddress;
-      }
-    }
-
-    res.json({
-      id: order.id,
-      orderNumber: order.orderNumber,
-      user: {
-        id: order.userId,
-        name: `${order.userName || ''} ${order.userSurname || ''}`.trim() || 'Müşteri',
-        email: order.userEmail || '-',
-        address: parsedAddress,
-      },
-      subtotal: Number(order.subtotal || 0),
-      shippingCost: Number(order.shippingCost || 0),
-      discountAmount: Number(order.discountAmount || 0),
-      totalAmount: Number(order.totalAmount || 0),
-      paymentMethod: 'Stripe',
-      paymentStatus: order.paymentStatus,
-      orderStatus: order.orderStatus || 'Ödeme Yapıldı',
-      cargoCompany: order.cargoCompany || '',
-      trackingNumber: order.trackingNumber || '',
-      createdAt: order.createdAt,
-      items: items.map((i) => ({
-        id: i.product_id,
-        name: i.product_name,
-        price: Number(i.price || 0),
-        quantity: Number(i.quantity || 1),
-        totalPrice: Number(i.total_price || 0),
-      })),
-    });
+    res.json({ message: 'Siparişiniz başarıyla iptal edildi.', id });
   } catch (error) {
-    console.error('Sipariş Detay Hatası:', error);
-    res.status(500).json({ error: 'Sipariş detayı alınırken hata oluştu.' });
+    console.error('Sipariş İptal Hatası:', error);
+    res.status(500).json({ error: 'Sipariş iptal edilirken veritabanı hatası oluştu.' });
   }
 });
 
-// PATCH /:id - Sipariş Durumu ve Kargo Bilgilerini Güncelleme
+// PATCH /:id - Admin Tarafından Sipariş/İade Durumu ve Kargo Bilgilerini Güncelleme
 router.patch('/:id', async (req, res) => {
   const { id } = req.params;
   const { orderStatus, cargoCompany, trackingNumber } = req.body;
@@ -195,7 +132,7 @@ router.patch('/:id', async (req, res) => {
     }
 
     res.json({ 
-      message: 'Sipariş ve kargo bilgileri başarıyla güncellendi.', 
+      message: 'Sipariş bilgileri başarıyla güncellendi.', 
       id, 
       orderStatus, 
       cargoCompany, 
