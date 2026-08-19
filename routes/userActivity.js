@@ -100,36 +100,53 @@ router.get('/orders/monthly', authenticateToken, async (req, res) => {
 });
 
 // ==========================================
-// 2. İADE ROTALARI
+// 2. İADE ROTALARI (GÜNCELLENDİ)
 // ==========================================
 
 // İADE TALEBİ OLUŞTUR (POST)
 router.post('/returns', authenticateToken, async (req, res) => {
   const userId = req.user.id;
-  const { orderId, productId, reason, description } = req.body;
+  const { orderId, productId, reason, description, iban } = req.body;
 
-  if (!orderId || !productId || !reason) {
-    return res.status(400).json({ message: 'Sipariş, ürün ve iade nedeni zorunludur.' });
+  if (!orderId || !reason) {
+    return res.status(400).json({ message: 'Sipariş ve iade nedeni zorunludur.' });
   }
 
   try {
-    const [existing] = await db.query(
-      `SELECT id FROM returns WHERE user_id = ? AND order_id = ? AND product_id = ?`,
-      [userId, orderId, productId]
-    );
+    // 1. Ürün bazlı iade talebi mükerrerlik kontrolü
+    if (productId) {
+      const [existing] = await db.query(
+        `SELECT id FROM returns WHERE user_id = ? AND order_id = ? AND product_id = ?`,
+        [userId, orderId, productId]
+      );
 
-    if (existing.length > 0) {
-      return res.status(400).json({ message: 'Bu ürün için zaten bir iade talebiniz bulunmaktadır.' });
+      if (existing.length > 0) {
+        return res.status(400).json({ message: 'Bu ürün için zaten bir iade talebiniz bulunmaktadır.' });
+      }
     }
 
+    // 2. Admin paneline düşmesi için orders tablosunda sipariş durumunu ve IBAN bilgisini güncelle
+    if (iban) {
+      await db.query(
+        `UPDATE orders SET order_status = 'İade Talebi Oluşturuldu', iban = ? WHERE id = ? AND user_id = ?`,
+        [iban, orderId, userId]
+      );
+    } else {
+      await db.query(
+        `UPDATE orders SET order_status = 'İade Talebi Oluşturuldu' WHERE id = ? AND user_id = ?`,
+        [orderId, userId]
+      );
+    }
+
+    // 3. Returns tablosuna detaylı iade kaydı ekle
     const [result] = await db.query(
       `INSERT INTO returns (user_id, order_id, product_id, reason, description, status)
-       VALUES (?, ?, ?, ?, ?, 'İade Talebi Alındı')`,
-      [userId, orderId, productId, reason, description || '']
+       VALUES (?, ?, ?, ?, ?, 'Beklemede')`,
+      [userId, orderId, productId || null, reason, description || '']
     );
 
     res.status(201).json({
-      message: 'İade talebiniz başarıyla oluşturuldu.',
+      message: 'İade talebiniz başarıyla oluşturuldu ve yönetici paneline iletildi.',
       returnId: result.insertId
     });
   } catch (error) {

@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../config/db');
 
-// GET / - Tüm siparişleri getir
+// GET /api/admin/orders - Tüm Siparişleri İade ve Kart/IBAN Detaylarıyla Getir
 router.get('/', async (req, res) => {
   try {
     const [orders] = await db.query(`
@@ -10,6 +10,10 @@ router.get('/', async (req, res) => {
         o.id,
         o.order_number AS orderNumber,
         o.stripe_session_id AS stripeSessionId,
+        o.payment_method AS paymentMethod,
+        o.card_last4 AS cardLast4,
+        o.card_brand AS cardBrand,
+        o.iban AS iban,
         o.subtotal,
         o.shipping_cost AS shippingCost,
         o.discount_amount AS discountAmount,
@@ -24,9 +28,14 @@ router.get('/', async (req, res) => {
         u.id AS userId,
         u.name AS userName,
         u.surname AS userSurname,
-        u.email AS userEmail
+        u.email AS userEmail,
+        r.reason AS returnReason,
+        r.description AS returnDescription,
+        r.status AS returnStatus,
+        r.created_at AS returnCreatedAt
       FROM orders o
       LEFT JOIN users u ON o.user_id = u.id
+      LEFT JOIN returns r ON o.id = r.order_id
       ORDER BY o.created_at DESC
     `);
 
@@ -73,9 +82,20 @@ router.get('/', async (req, res) => {
           email: order.userEmail || '-',
           address: parsedAddress,
         },
+        paymentInfo: {
+          method: order.paymentMethod || 'Kredi Kartı',
+          cardLast4: order.cardLast4 || null,
+          cardBrand: order.cardBrand || null,
+          iban: order.iban || null,
+          paymentStatus: order.paymentStatus
+        },
+        returnData: order.returnReason ? {
+          reason: order.returnReason,
+          description: order.returnDescription,
+          status: order.returnStatus,
+          createdAt: order.returnCreatedAt
+        } : null,
         totalAmount: Number(order.totalAmount || 0),
-        paymentMethod: 'Stripe',
-        paymentStatus: order.paymentStatus,
         orderStatus: order.orderStatus || 'Ödeme Yapıldı',
         cargoCompany: order.cargoCompany || '',
         trackingNumber: order.trackingNumber || '',
@@ -131,8 +151,15 @@ router.patch('/:id', async (req, res) => {
       return res.status(404).json({ error: 'Güncellenecek sipariş bulunamadı.' });
     }
 
+    // Eğer iade onaylandıysa returns tablosunu da güncelle
+    if (orderStatus === 'İade Onaylandı (Para İadesi Yapıldı)') {
+      await db.query(`UPDATE returns SET status = 'Onaylandı' WHERE order_id = ?`, [id]);
+    } else if (orderStatus === 'İade Reddedildi') {
+      await db.query(`UPDATE returns SET status = 'Reddedildi' WHERE order_id = ?`, [id]);
+    }
+
     res.json({ 
-      message: 'Sipariş bilgileri başarıyla güncellendi.', 
+      message: 'Sipariş ve İade bilgileri başarıyla güncellendi.', 
       id, 
       orderStatus, 
       cargoCompany, 
