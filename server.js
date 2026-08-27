@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Rotaların Import Edilmesi
+const maintenanceRoutes = require('./routes/maintenanceRoutes');
 const productRoutes = require('./routes/productRoutes');
 const authRoutes = require('./routes/authRoutes');
 const megaBannerRoutes = require('./routes/megaBannerRoutes');
@@ -32,6 +33,8 @@ const couponRoutes = require('./routes/couponRoutes');
 // Veritabanı Tabanlı Sipariş ve Ödeme Rotaları
 const ordersRouter = require('./routes/orders');
 const checkoutRoutes = require('./routes/checkoutRoutes');
+
+
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -70,6 +73,7 @@ app.get('/robots.txt', async (req, res) => {
 });
 
 // API Rotalarının Bağlanması
+app.use('/api/maintenance', maintenanceRoutes);
 app.use('/api/products', productRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/mega-banners', megaBannerRoutes);
