@@ -3,7 +3,7 @@ const router = express.Router();
 const db = require('../config/db');
 const jwt = require('jsonwebtoken');
 
-// Tablonun varlığını ve varsayılan yapıyı garanti eden yardımcı fonksiyon
+// Tablo Kontrolü
 const ensureTableExists = async () => {
   try {
     await db.query(`
@@ -17,41 +17,34 @@ const ensureTableExists = async () => {
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
     `);
   } catch (err) {
-    console.error('Bakım modu tablosu oluşturulurken/kontrol edilirken hata:', err);
+    console.error('Bakım modu tablosu hatası:', err);
   }
 };
 
-// JWT Token Doğrulama Middleware (Admin Yetkisi İçin)
+// Admin Yetki Kontrolü
 const verifyAdmin = (req, res, next) => {
   const authHeader = req.headers.authorization;
-  if (!authHeader) {
-    return res.status(401).json({ message: 'Yetkilendirme başlığı bulunamadı.' });
-  }
+  if (!authHeader) return res.status(401).json({ message: 'Yetkilendirme eksik.' });
 
   const token = authHeader.split(' ')[1];
-  if (!token) {
-    return res.status(401).json({ message: 'Erişim engellendi, token eksik.' });
-  }
-
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secretkey');
-    if (decoded.role !== 'admin') {
-      return res.status(403).json({ message: 'Bu işlem için admin yetkisi gereklidir.' });
-    }
+    if (decoded.role !== 'admin') return res.status(403).json({ message: 'Yetkisiz erişim.' });
     req.user = decoded;
     next();
   } catch (err) {
-    return res.status(401).json({ message: 'Geçersiz veya süresi dolmuş token.' });
+    return res.status(401).json({ message: 'Geçersiz token.' });
   }
 };
 
-// 1. Genel Kullanıcı İçin Bakım Modu Durumunu Getir (Public - Herkes Erişebilir)
+// 1. Public Bakım Durumu Sorgusu
 router.get('/status', async (req, res) => {
   try {
     await ensureTableExists();
     const [rows] = await db.query(
       'SELECT is_active, title, message, estimated_end_datetime FROM maintenance_settings WHERE id = 1'
     );
+
     if (rows.length === 0) {
       return res.json({
         is_active: false,
@@ -60,62 +53,56 @@ router.get('/status', async (req, res) => {
         estimated_end_datetime: null
       });
     }
+
+    // is_active alanını kesin olarak boolean tipe dönüştürüyoruz
+    const isActive = rows[0].is_active === 1 || rows[0].is_active === true || rows[0].is_active === '1';
+
     res.json({
-      is_active: Boolean(rows[0].is_active),
+      is_active: isActive,
       title: rows[0].title || 'Sitemiz Bakımdadır',
       message: rows[0].message || 'Kısa süre sonra hizmetinizdeyiz.',
       estimated_end_datetime: rows[0].estimated_end_datetime
     });
   } catch (error) {
     console.error('Bakım durumu çekilirken hata:', error);
-    res.status(500).json({ message: 'Veritabanı hatası.', error: error.message });
+    res.status(500).json({ message: 'Veritabanı hatası.' });
   }
 });
 
-// 2. Admin İçin Tüm Bakım Ayarlarını Getir (Protected)
+// 2. Admin Ayar Getirme
 router.get('/admin/settings', verifyAdmin, async (req, res) => {
   try {
     await ensureTableExists();
     const [rows] = await db.query('SELECT * FROM maintenance_settings WHERE id = 1');
     if (rows.length === 0) {
-      return res.json({
-        is_active: false,
-        title: 'Sitemiz Bakımdadır',
-        message: 'Sizlere daha iyi hizmet verebilmek için altyapımızı güncelliyoruz.',
-        estimated_end_datetime: null
-      });
+      return res.json({ is_active: false, title: 'Sitemiz Bakımdadır', message: '', estimated_end_datetime: null });
     }
     res.json({
-      is_active: Boolean(rows[0].is_active),
+      is_active: rows[0].is_active === 1 || rows[0].is_active === true || rows[0].is_active === '1',
       title: rows[0].title,
       message: rows[0].message,
       estimated_end_datetime: rows[0].estimated_end_datetime
     });
   } catch (error) {
-    console.error('Ayarlar çekilirken hata:', error);
-    res.status(500).json({ message: 'Ayarlar çekilirken hata oluştu.', error: error.message });
+    res.status(500).json({ message: 'Ayarlar çekilemedi.' });
   }
 });
 
-// 3. Admin Bakım Modunu Güncelle (Protected & Garantili Kayıt)
+// 3. Admin Ayar Güncelleme
 router.put('/admin/settings', verifyAdmin, async (req, res) => {
   const { is_active, title, message, estimated_end_datetime } = req.body;
 
   try {
     await ensureTableExists();
-
-    // 1. Önce id = 1 kaydının veritabanında var olup olmadığını kontrol et
     const [existing] = await db.query('SELECT id FROM maintenance_settings WHERE id = 1');
 
     if (existing.length === 0) {
-      // Kayıt hiç yoksa İLK DEFA EKLE (INSERT)
       await db.query(
         `INSERT INTO maintenance_settings (id, is_active, title, message, estimated_end_datetime) 
          VALUES (1, ?, ?, ?, ?)`,
         [is_active ? 1 : 0, title, message, estimated_end_datetime || null]
       );
     } else {
-      // Kayıt zaten varsa GÜNCELLE (UPDATE)
       await db.query(
         `UPDATE maintenance_settings 
          SET is_active = ?, title = ?, message = ?, estimated_end_datetime = ?
@@ -124,10 +111,10 @@ router.put('/admin/settings', verifyAdmin, async (req, res) => {
       );
     }
 
-    res.json({ success: true, message: 'Bakım modu ayarları başarıyla veritabanına kaydedildi.' });
+    res.json({ message: 'Bakım modu ayarları başarıyla güncellendi.' });
   } catch (error) {
-    console.error('Bakım modu güncellenirken veritabanı hatası:', error);
-    res.status(500).json({ message: 'Ayarlar veritabanına kaydedilemedi.', error: error.message });
+    console.error('Güncelleme hatası:', error);
+    res.status(500).json({ message: 'Ayarlar kaydedilemedi.' });
   }
 });
 
