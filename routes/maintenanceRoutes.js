@@ -21,6 +21,14 @@ const ensureTableExists = async () => {
   }
 };
 
+// Veri tabanından gelen is_active değerini kesin olarak boolean'a çeviren güvenli yardımcı fonksiyon
+const parseBooleanValue = (val) => {
+  if (val === true || val === 1 || val === '1') return true;
+  if (Buffer.isBuffer(val)) return val[0] === 1;
+  if (typeof val === 'object' && val !== null && val.data) return val.data[0] === 1;
+  return Number(val) === 1;
+};
+
 // Admin Yetki Kontrolü
 const verifyAdmin = (req, res, next) => {
   const authHeader = req.headers.authorization;
@@ -45,7 +53,7 @@ router.get('/status', async (req, res) => {
       'SELECT is_active, title, message, estimated_end_datetime FROM maintenance_settings WHERE id = 1'
     );
 
-    if (rows.length === 0) {
+    if (!rows || rows.length === 0) {
       return res.json({
         is_active: false,
         title: 'Sitemiz Bakımdadır',
@@ -54,8 +62,7 @@ router.get('/status', async (req, res) => {
       });
     }
 
-    // is_active alanını kesin olarak boolean tipe dönüştürüyoruz
-    const isActive = rows[0].is_active === 1 || rows[0].is_active === true || rows[0].is_active === '1';
+    const isActive = parseBooleanValue(rows[0].is_active);
 
     res.json({
       is_active: isActive,
@@ -65,7 +72,7 @@ router.get('/status', async (req, res) => {
     });
   } catch (error) {
     console.error('Bakım durumu çekilirken hata:', error);
-    res.status(500).json({ message: 'Veritabanı hatası.' });
+    res.status(500).json({ message: 'Veritabanı hatası.', is_active: false });
   }
 });
 
@@ -74,11 +81,11 @@ router.get('/admin/settings', verifyAdmin, async (req, res) => {
   try {
     await ensureTableExists();
     const [rows] = await db.query('SELECT * FROM maintenance_settings WHERE id = 1');
-    if (rows.length === 0) {
+    if (!rows || rows.length === 0) {
       return res.json({ is_active: false, title: 'Sitemiz Bakımdadır', message: '', estimated_end_datetime: null });
     }
     res.json({
-      is_active: rows[0].is_active === 1 || rows[0].is_active === true || rows[0].is_active === '1',
+      is_active: parseBooleanValue(rows[0].is_active),
       title: rows[0].title,
       message: rows[0].message,
       estimated_end_datetime: rows[0].estimated_end_datetime
@@ -96,18 +103,20 @@ router.put('/admin/settings', verifyAdmin, async (req, res) => {
     await ensureTableExists();
     const [existing] = await db.query('SELECT id FROM maintenance_settings WHERE id = 1');
 
+    const activeVal = is_active ? 1 : 0;
+
     if (existing.length === 0) {
       await db.query(
         `INSERT INTO maintenance_settings (id, is_active, title, message, estimated_end_datetime) 
          VALUES (1, ?, ?, ?, ?)`,
-        [is_active ? 1 : 0, title, message, estimated_end_datetime || null]
+        [activeVal, title, message, estimated_end_datetime || null]
       );
     } else {
       await db.query(
         `UPDATE maintenance_settings 
          SET is_active = ?, title = ?, message = ?, estimated_end_datetime = ?
          WHERE id = 1`,
-        [is_active ? 1 : 0, title, message, estimated_end_datetime || null]
+        [activeVal, title, message, estimated_end_datetime || null]
       );
     }
 
