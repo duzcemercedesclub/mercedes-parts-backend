@@ -2,7 +2,7 @@ const nodemailer = require('nodemailer');
 const db = require('../config/db');
 const dns = require('dns');
 
-// Node.js'in DNS sorgularında IPv4'ü öncelikli kılmasını sağlıyoruz (IPv6 ENETUNREACH hatasını çözer)
+// Render üzerindeki IPv6 ve DNS kilitlenmelerini önlemek için varsayılanı IPv4 yapıyoruz
 dns.setDefaultResultOrder('ipv4first');
 
 /**
@@ -18,17 +18,18 @@ const createDynamicTransporter = async () => {
     const settings = rows[0];
 
     const transporter = nodemailer.createTransport({
-        host: settings.smtp_host || 'smtp.gmail.com',
-        port: parseInt(settings.smtp_port) || 587,
-        secure: settings.smtp_port == 465,
-        family: 4, // Sadece IPv4 IP adreslerini kullanmasını zorunlu kılıyoruz
+        host: 'smtp.gmail.com',   // Doğrudan Gmail hostu
+        port: 587,                // ⚠️ 465 YERİNE MUTLAKA 587 KULLANIN
+        secure: false,            // Port 587 için secure: false olmalıdır (STARTTLS kullanır)
+        requireTLS: true,
+        family: 4,                // Sadece IPv4 adresi kullanmaya zorlar
         auth: {
             user: settings.smtp_user,
-            pass: settings.smtp_pass
+            pass: settings.smtp_pass // 16 Haneli Google Uygulama Şifresi
         },
-        connectionTimeout: 15000,
-        greetingTimeout: 15000,
-        socketTimeout: 15000,
+        connectionTimeout: 20000, // 20 Saniye zaman aşımı
+        greetingTimeout: 20000,
+        socketTimeout: 20000,
         tls: {
             rejectUnauthorized: false
         }
