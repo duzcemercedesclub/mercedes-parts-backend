@@ -2,9 +2,6 @@ const nodemailer = require('nodemailer');
 const db = require('../config/db');
 const dns = require('dns');
 
-// Render üzerindeki IPv6 ve DNS kilitlenmelerini önlemek için varsayılanı IPv4 yapıyoruz
-dns.setDefaultResultOrder('ipv4first');
-
 /**
  * Veritabanından en güncel SMTP ayarlarını çekerek Transporter oluşturur.
  */
@@ -18,18 +15,20 @@ const createDynamicTransporter = async () => {
     const settings = rows[0];
 
     const transporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com',   // Doğrudan Gmail hostu
-        port: 587,                // ⚠️ 465 YERİNE MUTLAKA 587 KULLANIN
-        secure: false,            // Port 587 için secure: false olmalıdır (STARTTLS kullanır)
-        requireTLS: true,
-        family: 4,                // Sadece IPv4 adresi kullanmaya zorlar
+        host: 'smtp.gmail.com',
+        port: 587,
+        secure: false, // Port 587 için false olmalıdır
         auth: {
             user: settings.smtp_user,
             pass: settings.smtp_pass // 16 Haneli Google Uygulama Şifresi
         },
-        connectionTimeout: 20000, // 20 Saniye zaman aşımı
-        greetingTimeout: 20000,
-        socketTimeout: 20000,
+        // 🚨 KESİN ÇÖZÜM: DNS sorgusunu doğrudan IPv4 (family: 4) adrese zorluyoruz
+        lookup: (hostname, options, callback) => {
+            dns.lookup(hostname, { family: 4 }, callback);
+        },
+        connectionTimeout: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 15000,
         tls: {
             rejectUnauthorized: false
         }
