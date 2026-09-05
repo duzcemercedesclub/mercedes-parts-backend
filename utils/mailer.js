@@ -16,13 +16,18 @@ const createDynamicTransporter = async () => {
     const transporter = nodemailer.createTransport({
         host: settings.smtp_host,
         port: parseInt(settings.smtp_port) || 587,
-        secure: settings.smtp_secure === 'ssl',
+        secure: settings.smtp_port == 465, // Port 465 ise true, 587 ise false
         auth: {
             user: settings.smtp_user,
             pass: settings.smtp_pass
         },
+        // Render gibi bulut sunucularında SMTP zaman aşımını ve TLS bloklarını önleme ayarları
+        connectionTimeout: 10000, // 10 Saniye
+        greetingTimeout: 10000,
+        socketTimeout: 10000,
         tls: {
-            rejectUnauthorized: false
+            rejectUnauthorized: false,
+            ciphers: 'SSLv3'
         }
     });
 
@@ -30,19 +35,14 @@ const createDynamicTransporter = async () => {
 };
 
 /**
- * Site genelinde e-posta gönderimi yapan yardımcı fonksiyon.
- * @param {Object} options 
- * @param {string} options.to - Alıcı e-posta adresi
- * @param {string} options.subject - E-posta konusu
- * @param {string} options.html - HTML İçerik
- * @param {string} [options.replyTo] - Yanıt adresi (İletişim formlarında ziyaretçi adresi için)
+ * E-posta gönderim fonksiyonu
  */
 const sendEmail = async ({ to, subject, html, replyTo }) => {
     try {
         const { transporter, settings } = await createDynamicTransporter();
 
         const mailOptions = {
-            from: `"${settings.from_name || 'E-Ticaret Sitesi'}" <${settings.from_email || settings.smtp_user}>`,
+            from: `"${settings.from_name || 'Düzce Mercedes Parts'}" <${settings.from_email || settings.smtp_user}>`,
             to,
             subject,
             html,
@@ -50,9 +50,10 @@ const sendEmail = async ({ to, subject, html, replyTo }) => {
         };
 
         const info = await transporter.sendMail(mailOptions);
+        console.log('✅ E-Posta Başarıyla Gönderildi | MessageID:', info.messageId);
         return { success: true, messageId: info.messageId };
     } catch (error) {
-        console.error('E-Posta Gönderim Hatası:', error);
+        console.error('❌ E-Posta Gönderim Hatası (Render/SMTP):', error.message);
         return { success: false, error: error.message };
     }
 };

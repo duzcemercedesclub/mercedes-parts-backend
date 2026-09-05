@@ -5,7 +5,7 @@ const jwt = require('jsonwebtoken');
 const db = require('../config/db');
 const { sendEmail } = require('../utils/mailer');
 
-// Şifre sıfırlama kodları için tabloyu otomatik oluştur (eğer yoksa)
+// Şifre sıfırlama kodları için tabloyu otomatik oluştur
 const createPasswordResetsTable = async () => {
     try {
         await db.query(`
@@ -26,15 +26,7 @@ createPasswordResetsTable();
 // 1. KULLANICI KAYIT ENDPOINT'I
 router.post('/register', async (req, res) => {
     const { 
-        name, 
-        surname, 
-        email, 
-        phone_code, 
-        phone, 
-        password, 
-        gender, 
-        is_terms_accepted, 
-        is_marketing_accepted 
+        name, surname, email, phone_code, phone, password, gender, is_terms_accepted, is_marketing_accepted 
     } = req.body;
 
     if (!name || !email || !password) {
@@ -45,7 +37,6 @@ router.post('/register', async (req, res) => {
         return res.status(400).json({ message: 'Üyelik Sözleşmesini kabul etmelisiniz.' });
     }
 
-    // Şifre Karmaşıklık Kontrolü (8-15 Karakter, Min 1 Rakam, Min 1 Büyük ve 1 Küçük Harf)
     const passwordRegex = /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{8,15}$/;
     if (!passwordRegex.test(password)) {
         return res.status(400).json({ message: 'Şifreniz belirtilen kurallara uymamaktadır.' });
@@ -74,29 +65,17 @@ router.post('/register', async (req, res) => {
         `;
         
         const [result] = await db.query(sql, [
-            name, 
-            surname || null, 
-            email, 
-            phone_code || '+90', 
-            phone || null, 
-            hashedPassword, 
-            gender || 'unspecified', 
-            'user', 
-            is_marketing_accepted ? 1 : 0
+            name, surname || null, email, phone_code || '+90', phone || null, hashedPassword, gender || 'unspecified', 'user', is_marketing_accepted ? 1 : 0
         ]);
 
-        res.status(201).json({ 
-            message: 'Kullanıcı kaydı başarıyla oluşturuldu.',
-            userId: result.insertId 
-        });
-
+        res.status(201).json({ message: 'Kullanıcı kaydı başarıyla oluşturuldu.', userId: result.insertId });
     } catch (error) {
         console.error('Kayıt hatası:', error);
         res.status(500).json({ message: 'Sunucu hatası, kayıt yapılamadı.' });
     }
 });
 
-// 2. KULLANICI GİRİŞ ENDPOINT'I (Beni Hatırla Desteği İle)
+// 2. KULLANICI GİRİŞ ENDPOINT'I
 router.post('/login', async (req, res) => {
     const { identifier, password, rememberMe } = req.body;
 
@@ -105,25 +84,18 @@ router.post('/login', async (req, res) => {
     }
 
     try {
-        const [rows] = await db.query(
-            'SELECT * FROM users WHERE email = ? OR phone = ?', 
-            [identifier, identifier]
-        );
-
+        const [rows] = await db.query('SELECT * FROM users WHERE email = ? OR phone = ?', [identifier, identifier]);
         if (rows.length === 0) {
             return res.status(400).json({ message: 'Geçersiz e-posta / telefon veya şifre.' });
         }
 
         const user = rows[0];
-
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             return res.status(400).json({ message: 'Geçersiz e-posta / telefon veya şifre.' });
         }
 
-        // Beni Hatırla seçiliyse token 30 gün geçerli, seçili değilse 1 gün geçerli
         const expiresIn = rememberMe ? '30d' : '1d';
-
         const token = jwt.sign(
             { id: user.id, role: user.role },
             process.env.JWT_SECRET || 'secretkey',
@@ -133,16 +105,8 @@ router.post('/login', async (req, res) => {
         res.status(200).json({
             message: 'Giriş başarılı!',
             token,
-            user: {
-                id: user.id,
-                name: user.name,
-                surname: user.surname,
-                email: user.email,
-                phone: user.phone,
-                role: user.role
-            }
+            user: { id: user.id, name: user.name, surname: user.surname, email: user.email, phone: user.phone, role: user.role }
         });
-
     } catch (error) {
         console.error('Giriş hatası:', error);
         res.status(500).json({ message: 'Sunucu hatası, giriş yapılamadı.' });
@@ -164,21 +128,19 @@ router.post('/forgot-password', async (req, res) => {
         }
 
         const user = users[0];
-        // 6 Haneli Rastgele Sayısal Kod Üret
         const code = Math.floor(100000 + Math.random() * 900000).toString();
-        const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 Dakika geçerli
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 Dk geçerli
 
-        // Varsa eski doğrulama kodlarını temizle ve yenisini kaydet
         await db.query('DELETE FROM password_resets WHERE email = ?', [email]);
         await db.query(
             'INSERT INTO password_resets (email, code, expires_at) VALUES (?, ?, ?)',
             [email, code, expiresAt]
         );
 
-        // A. İstemciye (Frontend) ANINDA Yanıt Ver (Butonun takılmasını önler)
+        // Kullanıcıya anında onay dön
         res.status(200).json({ message: 'Doğrulama kodu e-posta adresinize gönderildi.' });
 
-        // B. E-Posta Gönderimini Arka Planda Asenkron Çalıştır
+        // Arka Planda Mail Gönder
         (async () => {
             try {
                 const emailHtml = `
@@ -199,11 +161,15 @@ router.post('/forgot-password', async (req, res) => {
                     </div>
                 `;
 
-                await sendEmail({
+                const mailRes = await sendEmail({
                     to: email,
                     subject: 'Düzce Mercedes Parts - Şifre Sıfırlama Kodu',
                     html: emailHtml
                 });
+
+                if(!mailRes.success) {
+                   console.error('❌ Mail gönderilemedi, detay:', mailRes.error);
+                }
             } catch (mailErr) {
                 console.error('Arka plan e-posta gönderim hatası:', mailErr);
             }
@@ -215,7 +181,7 @@ router.post('/forgot-password', async (req, res) => {
     }
 });
 
-// 4. ŞİFREMİ UNUTTUM - KODU DOĞRULA VE YENİ ŞİFREYİ VERİTABANINDA GÜNCELLE
+// 4. ŞİFREMİ UNUTTUM - KODU DOĞRULA VE ŞİFREYİ GÜNCELLE
 router.post('/reset-password', async (req, res) => {
     const { email, code, newPassword } = req.body;
 
@@ -223,7 +189,6 @@ router.post('/reset-password', async (req, res) => {
         return res.status(400).json({ message: 'Lütfen tüm alanları doldurun.' });
     }
 
-    // Şifre Karmaşıklık Kontrolü (8-15 Karakter, Min 1 Rakam, Min 1 Büyük ve 1 Küçük Harf)
     const passwordRegex = /^(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{8,15}$/;
     if (!passwordRegex.test(newPassword)) {
         return res.status(400).json({ 
@@ -232,7 +197,6 @@ router.post('/reset-password', async (req, res) => {
     }
 
     try {
-        // Süresi dolmamış kodu kontrol et
         const [rows] = await db.query(
             'SELECT * FROM password_resets WHERE email = ? AND code = ? AND expires_at > NOW()',
             [email, code]
@@ -242,21 +206,17 @@ router.post('/reset-password', async (req, res) => {
             return res.status(400).json({ message: 'Doğrulama kodu hatalı veya süresi dolmuş!' });
         }
 
-        // Yeni şifreyi bcrypt ile şifrele
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(newPassword, salt);
 
-        // Veritabanındaki kullanıcı şifresini güncelle
         await db.query('UPDATE users SET password = ? WHERE email = ?', [hashedPassword, email]);
-
-        // Kullanılan kodu veritabanından sil
         await db.query('DELETE FROM password_resets WHERE email = ?', [email]);
 
         res.status(200).json({ message: 'Şifreniz başarıyla güncellendi. Yeni şifrenizle giriş yapabilirsiniz.' });
 
     } catch (error) {
         console.error('Şifre sıfırlama hatası:', error);
-        res.status(500).json({ message: 'Sunucu hatası,s şifre güncellenemedi.' });
+        res.status(500).json({ message: 'Sunucu hatası, şifre güncellenemedi.' });
     }
 });
 
