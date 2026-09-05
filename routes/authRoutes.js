@@ -166,9 +166,7 @@ router.post('/forgot-password', async (req, res) => {
         const user = users[0];
         // 6 Haneli Rastgele Sayısal Kod Üret
         const code = Math.floor(100000 + Math.random() * 900000).toString();
-        
-        // Kodun 15 Dakika Geçerlilik Süresi Olsun
-        const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
+        const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 Dakika geçerli
 
         // Varsa eski doğrulama kodlarını temizle ve yenisini kaydet
         await db.query('DELETE FROM password_resets WHERE email = ?', [email]);
@@ -177,40 +175,43 @@ router.post('/forgot-password', async (req, res) => {
             [email, code, expiresAt]
         );
 
-        // E-Posta Şablonu Oluştur ve Gönder
-        const emailHtml = `
-            <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px; background-color: #ffffff;">
-                <h2 style="color: #0f172a; text-align: center; margin-top: 0;">Şifre Sıfırlama Kodu</h2>
-                <p style="color: #334155; font-size: 15px;">Merhaba <strong>${user.name}</strong>,</p>
-                <p style="color: #475569; font-size: 14px; line-height: 1.5;">
-                    Düzce Mercedes Parts hesabınızın şifresini yenilemek için talepte bulundunuz. Aşağıdaki doğrulama kodunu ekrandaki alana giriniz:
-                </p>
-                <div style="text-align: center; margin: 25px 0;">
-                    <span style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #38bdf8; background: #0f172a; padding: 12px 24px; border-radius: 8px; display: inline-block;">
-                        ${code}
-                    </span>
-                </div>
-                <p style="font-size: 12px; color: #94a3b8; text-align: center;">
-                    Bu doğrulama kodu <strong>15 dakika</strong> boyunca geçerlidir. Eğer şifre sıfırlama talebinde bulunmadıysanız bu e-postayı dikkate almayınız.
-                </p>
-            </div>
-        `;
-
-        const mailResult = await sendEmail({
-            to: email,
-            subject: 'Düzce Mercedes Parts - Şifre Sıfırlama Kodu',
-            html: emailHtml
-        });
-
-        if (!mailResult.success) {
-            return res.status(500).json({ message: 'E-posta gönderilemedi: ' + mailResult.error });
-        }
-
+        // A. İstemciye (Frontend) ANINDA Yanıt Ver (Butonun takılmasını önler)
         res.status(200).json({ message: 'Doğrulama kodu e-posta adresinize gönderildi.' });
 
+        // B. E-Posta Gönderimini Arka Planda Asenkron Çalıştır
+        (async () => {
+            try {
+                const emailHtml = `
+                    <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px; background-color: #ffffff;">
+                        <h2 style="color: #0f172a; text-align: center; margin-top: 0;">Şifre Sıfırlama Kodu</h2>
+                        <p style="color: #334155; font-size: 15px;">Merhaba <strong>${user.name}</strong>,</p>
+                        <p style="color: #475569; font-size: 14px; line-height: 1.5;">
+                            Düzce Mercedes Parts hesabınızın şifresini yenilemek için talepte bulundunuz. Aşağıdaki doğrulama kodunu ekrandaki alana giriniz:
+                        </p>
+                        <div style="text-align: center; margin: 25px 0;">
+                            <span style="font-size: 32px; font-weight: bold; letter-spacing: 6px; color: #38bdf8; background: #0f172a; padding: 12px 24px; border-radius: 8px; display: inline-block;">
+                                ${code}
+                            </span>
+                        </div>
+                        <p style="font-size: 12px; color: #94a3b8; text-align: center;">
+                            Bu doğrulama kodu <strong>15 dakika</strong> boyunca geçerlidir.
+                        </p>
+                    </div>
+                `;
+
+                await sendEmail({
+                    to: email,
+                    subject: 'Düzce Mercedes Parts - Şifre Sıfırlama Kodu',
+                    html: emailHtml
+                });
+            } catch (mailErr) {
+                console.error('Arka plan e-posta gönderim hatası:', mailErr);
+            }
+        })();
+
     } catch (error) {
-        console.error('Şifre sıfırlama kodu gönderme hatası:', error);
-        res.status(500).json({ message: 'Sunucu hatası, e-posta gönderilemedi.' });
+        console.error('Şifre sıfırlama kodu oluşturma hatası:', error);
+        res.status(500).json({ message: 'Sunucu hatası, kod oluşturulamadı.' });
     }
 });
 
