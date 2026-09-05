@@ -1,5 +1,9 @@
 const nodemailer = require('nodemailer');
 const db = require('../config/db');
+const dns = require('dns');
+
+// Node.js'in DNS sorgularında IPv4'ü öncelikli kılmasını sağlıyoruz (IPv6 ENETUNREACH hatasını çözer)
+dns.setDefaultResultOrder('ipv4first');
 
 /**
  * Veritabanından en güncel SMTP ayarlarını çekerek Transporter oluşturur.
@@ -14,20 +18,19 @@ const createDynamicTransporter = async () => {
     const settings = rows[0];
 
     const transporter = nodemailer.createTransport({
-        host: settings.smtp_host,
+        host: settings.smtp_host || 'smtp.gmail.com',
         port: parseInt(settings.smtp_port) || 587,
-        secure: settings.smtp_port == 465, // Port 465 ise true, 587 ise false
+        secure: settings.smtp_port == 465,
+        family: 4, // Sadece IPv4 IP adreslerini kullanmasını zorunlu kılıyoruz
         auth: {
             user: settings.smtp_user,
             pass: settings.smtp_pass
         },
-        // Render gibi bulut sunucularında SMTP zaman aşımını ve TLS bloklarını önleme ayarları
-        connectionTimeout: 10000, // 10 Saniye
-        greetingTimeout: 10000,
-        socketTimeout: 10000,
+        connectionTimeout: 15000,
+        greetingTimeout: 15000,
+        socketTimeout: 15000,
         tls: {
-            rejectUnauthorized: false,
-            ciphers: 'SSLv3'
+            rejectUnauthorized: false
         }
     });
 
